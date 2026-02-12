@@ -222,7 +222,7 @@ class ChildrenController extends Controller
             if ($problem === 0 && $h->count() == 0) {
                 $grouped[$nik]['intervensi'][] = [
                     'kader' => '-',
-                    'jenis' => 'Normal',
+                    'jenis' => '-',
                     'tgl_intervensi' => '-',
                     'bantuan' => '-',
                 ];
