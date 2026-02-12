@@ -19,15 +19,30 @@ class CadreController extends Controller
     public function index()
     {
         $user = Auth::user();
-        //dd($user);
-        $cadres = Cadre::with(['tpk', 'user']);
-        if ($user->role != 'SUPER ADMIN') {
 
-            $cadres->wherehas('user', function ($q) use ($user) {
-                $q->where('id_wilayah', $user->id_wilayah);
-            });
-        }
-        $cadres = $cadres->get();
+        $cadres = Cadre::with(['tpk', 'user']);
+
+        switch ($user->role) {
+            case 'SUPER ADMIN':
+                $cadres->whereHas('user', function ($q) {
+                    $q->whereNotNull('users.role');
+                });
+                break;
+            case 'ADMIN':
+                $cadres->whereHas('user', function ($q) use ($user) {
+                    $q->where('users.id_wilayah', $user->id_wilayah)
+                    ->whereRaw('LOWER(role) != ?', ['super admin'])
+                    ->whereNotNull('users.role');
+                });
+                break;
+
+
+            }
+
+        $cadres = $cadres->get()->filter(function ($cadre) {
+            return !is_null($cadre->user?->role);
+        });
+
 
         $data = $cadres->map(function ($cadre) {
             //dd($cadre->user->status);
@@ -39,13 +54,14 @@ class CadreController extends Controller
                 'status'        => $cadre->user ? ($cadre->user->status == 1 ? 'Aktif' : 'Non aktif') : 'Tidak ada user',
                 'phone'         => $cadre->user->phone ?? null,
                 'email'         => $cadre->user->email ?? null,
-                'role'          => $cadre->user->role ?? null,
+                'role'          => $cadre->user->role,
                 'unit_posyandu' => $cadre->posyandu->nama_posyandu ?? null, // kalau Cadre punya relasi posyandu
                 // kamu bisa tambahkan field action sendiri, misal tombol edit/delete
                 'action'        => null,
             ];
         });
 
+        //dd($data);
         \App\Models\Log::create([
             'id_user'  => \Auth::id(),
             'context'  => 'Kader / Pengguna',

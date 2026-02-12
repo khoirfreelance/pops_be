@@ -35,4 +35,3 @@ class FooterSocialLinkController extends Controller
         ]);
     }
 }
-

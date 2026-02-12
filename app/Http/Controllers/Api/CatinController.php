@@ -29,10 +29,6 @@ class CatinController extends Controller
             $data = Catin::get();
             $dataRaw = $data;
 
-            $data = $data->groupBy('nik_perempuan')->map(function ($group) {
-                return $group->sortByDesc('tanggal_pemeriksaan')->first();
-            });
-
             $data = $data->filter(function ($item) use ($request) {
                 if (!empty($request->provinsi) &&
                     strtolower(trim($item->provinsi)) !== strtolower(trim($request->provinsi))) {
@@ -86,40 +82,45 @@ class CatinController extends Controller
 
                 $start = $parsePeriode($request->periodeAwal)->startOfMonth()->format('Y-m-d');
                 $end = $parsePeriode($request->periodeAkhir)->endOfMonth()->format('Y-m-d');
-                // dd($start, $end);
+                //dd($start, $end);
+                //dd($data->toArray());
                 $data = $data->filter(function ($item) use ($start, $end) {
-                    // dd($item->tanggal_pemeriksaan_terakhir >= $start && $item->tanggal_pemeriksaan_terakhir <= $end);
-                    return $item->tanggal_pemeriksaan >= $start && $item->tanggal_pemeriksaan <= $end;
+                    // dd($item->tanggal_pendampingan_terakhir >= $start && $item->tanggal_pendampingan_terakhir <= $end);
+                    return $item->tanggal_pendampingan >= $start && $item->tanggal_pendampingan <= $end;
                 });
+                //dd($data);
             }
 
             if ($request->filled('status') && is_array($request->status)) {
                 $data = $data->filter(function ($q) use ($request) {
-                    $ok = true; // semua harus true
 
                     foreach ($request->status as $status) {
                         $statusLower = strtolower($status);
 
+                        // KEK
                         if (str_contains($statusLower, 'kek')) {
-                            if (empty($q->status_kek) || $q->status_kek !== 'KEK') {
-                                $ok = false;
+                            if (!empty($q->status_kek) && $q->status_kek === 'KEK') {
+                                return true;
                             }
                         }
 
+                        // Anemia
                         if (str_contains($statusLower, 'anemia')) {
-                            if (empty($q->status_hb) || $q->status_hb !== 'Anemia') {
-                                $ok = false;
+                            if (!empty($q->status_hb) && $q->status_hb === 'Anemia') {
+                                return true;
                             }
                         }
 
+                        // Risiko
                         if (str_contains($statusLower, 'risiko')) {
-                            if (empty($q->status_risiko) || $q->status_risiko !== 'Berisiko') {
-                                $ok = false;
+                            if (!empty($q->status_risiko) && $q->status_risiko === 'Berisiko') {
+                                return true;
                             }
                         }
                     }
 
-                    return $ok;
+                    // ❌ tidak ada satupun status yang cocok
+                    return false;
                 });
             }
 
@@ -207,7 +208,7 @@ class CatinController extends Controller
             ];
 
 
-            $grouped = $data->groupBy('nik_perempuan')->sortBy('tanggal_pemeriksaan')->map(function ($items) {
+            $grouped = $data->groupBy('nik_perempuan')->sortBy('tanggal_pendampingan')->map(function ($items) {
 
                 $main = $items->first();
 
@@ -303,7 +304,12 @@ class CatinController extends Controller
         // =========================
         // NORMAL FLOW
         // =========================
-        $total = $data->count();
+        $jml = $data
+            ->groupBy('nik_perempuan')
+            ->map(fn ($g) => $g->first())
+            ->values();
+
+        $total = $jml->count();
 
         $count = [
             'Anemia' => 0,
@@ -512,7 +518,7 @@ class CatinController extends Controller
                 'status_kek' => $latest->status_kek ?? '-',
                 'status_hb' => $latest->status_hb ?? '-',
 
-                'tgl_kunjungan' => $latest->tanggal_pemeriksaan ?? '-',
+                'tgl_kunjungan' => $latest->tanggal_pendampingan ?? '-',
                 'tb' => $latest->tinggi_perempuan ?? '-',
                 'bb' => $latest->berat_perempuan ?? '-',
                 'lila' => $latest->lila_perempuan ?? '-',
@@ -542,7 +548,7 @@ class CatinController extends Controller
             $riwayat = $records->map(function ($r) {
                 return [
                     'kader' => $r->nama_petugas,
-                    'tanggal' => $r->tanggal_pemeriksaan,
+                    'tanggal' => $r->tanggal_pendampingan,
                     'bb' => $r->berat_perempuan,
                     'tb' => $r->tinggi_perempuan,
                     'imt' => $r->imt_perempuan,
@@ -571,154 +577,6 @@ class CatinController extends Controller
             ], 500);
         }
     }
-
-    // public function import(Request $request)
-    // {
-    //     // ✅ Validasi file CSV
-    //     $validator = \Validator::make($request->all(), [
-    //         'file' => 'required|mimes:csv|max:2048',
-    //     ]);
-
-    //     if ($validator->fails()) {
-    //         return response()->json([
-    //             'message' => 'Validasi gagal',
-    //             'errors' => $validator->errors(),
-    //         ], 422);
-    //     }
-
-    //     $file = $request->file('file');
-    //     if (!$file->isValid()) {
-    //         return response()->json(['message' => 'File tidak valid.'], 400);
-    //     }
-
-    //     $path = $file->getRealPath();
-    //     $handle = fopen($path, 'r');
-
-    //     $header = null;
-    //     $rows = [];
-    //     $count = 0;
-
-    //     while (($data = fgetcsv($handle, 1000, ',')) !== false) {
-    //         if (empty($data[0]))
-    //             continue;
-
-    //         // baris pertama dianggap header
-    //         if (!$header) {
-    //             $header = $data;
-    //             continue;
-    //         }
-
-    //         $count++;
-
-    //         // ✅ Mapping kolom CSV ke field sesuai model Catin
-    //         $rows[] = [
-    //             'nama_petugas' => $data[0] ?? null,
-    //             'tanggal_pendampingan' => $this->convertDate($data[1] ?? null),
-
-    //             'nama_perempuan' => $data[2] ?? null,
-    //             'nik_perempuan' => $data[3] ?? null,
-    //             'pekerjaan_perempuan' => $data[4] ?? null,
-    //             'usia_perempuan' => $data[5] ?? 0,
-    //             'hp_perempuan' => $data[6] ?? null,
-
-    //             'nama_laki' => $data[7] ?? null,
-    //             'nik_laki' => $data[8] ?? null,
-    //             'pekerjaan_laki' => $data[9] ?? null,
-    //             'usia_laki' => $data[10] ?? 0,
-    //             'hp_laki' => $data[11] ?? null,
-
-    //             'pernikahan_ke' => $data[12] ?? null,
-
-    //             'provinsi' => $data[13] ?? null,
-    //             'kota' => $data[14] ?? null,
-    //             'kecamatan' => $data[15] ?? null,
-    //             'kelurahan' => $data[16] ?? null,
-    //             'rw' => $data[17] ?? null,
-    //             'rt' => $data[18] ?? null,
-    //             'posyandu' => $data[19] ?? null,
-
-    //             'tanggal_pemeriksaan' => $this->convertDate($data[20] ?? null),
-    //             'berat_perempuan' => $data[21] ?? null,
-    //             'tinggi_perempuan' => $data[22] ?? null,
-    //             'hb_perempuan' => $data[24] ?? null,
-    //             'lila_perempuan' => $data[23] ?? null,
-
-    //             'terpapar_rokok' => $this->toBool($data[25] ?? null),
-    //             'mendapat_ttd' => $this->toBool($data[26] ?? null),
-    //             'menggunakan_jamban' => $this->toBool($data[27] ?? null),
-    //             'sumber_air_bersih' => $this->toBool($data[28] ?? null),
-    //             'punya_riwayat_penyakit' => $this->toBool($data[29] ?? null),
-    //             'riwayat_penyakit' => $data[30] ?? null,
-    //             'mendapat_fasilitas_rujukan' => $this->toBool($data[31] ?? null),
-    //             'mendapat_kie' => $this->toBool($data[33] ?? null),
-    //             'mendapat_bantuan_pmt' => $this->toBool($data[33] ?? null),
-
-    //             'tanggal_rencana_menikah' => $this->convertDate($data[34] ?? null),
-    //             'rencana_tinggal' => $data[35] ?? null,
-    //         ];
-    //     }
-
-    //     fclose($handle);
-
-    //     // ✅ Simpan ke DB
-    //     if (!empty($rows)) {
-    //         DB::beginTransaction();
-    //         try {
-    //             foreach ($rows as $row) {
-    //                 // Perhitungan otomatis
-    //                 $imt = $this->hitungIMT($row['berat_perempuan'], $row['tinggi_perempuan']);
-    //                 $status_kek = $this->statusKEK($row['lila_perempuan']);
-    //                 $status_hb = $this->statusHB($row['hb_perempuan']);
-    //                 $status_risiko = $this->statusRisiko($row['usia_perempuan']);
-
-    //                 Catin::create(array_merge($row, [
-    //                     'imt_perempuan' => $imt,
-    //                     'status_kek' => $status_kek,
-    //                     'status_hb' => $status_hb,
-    //                     'status_risiko' => $status_risiko,
-    //                 ]));
-
-    //                 // ✅ Simpan atau ambil wilayah & posyandu
-    //                 $wilayah = Wilayah::firstOrCreate([
-    //                     'provinsi' => $row['provinsi'],
-    //                     'kota' => $row['kota'],
-    //                     'kecamatan' => $row['kecamatan'],
-    //                     'kelurahan' => $row['kelurahan'],
-    //                 ]);
-
-    //                 Posyandu::firstOrCreate([
-    //                     'nama_posyandu' => $row['posyandu'] ?? '-',
-    //                     'id_wilayah' => $wilayah->id,
-    //                     'rt' => $row['rt'] ?? null,
-    //                     'rw' => $row['rw'] ?? null,
-    //                 ]);
-
-    //                 Log::create([
-    //                     'id_user' => Auth::id(),
-    //                     'context' => 'Catin',
-    //                     'activity' => 'Import data calon pengantin ' . ($row['nama_perempuan'] ?? '-'),
-    //                     'timestamp' => now(),
-    //                 ]);
-    //             }
-
-    //             DB::commit();
-
-    //             return response()->json([
-    //                 'message' => "Berhasil import {$count} data calon pengantin",
-    //                 'count' => $count,
-    //             ], 200);
-    //         } catch (\Throwable $e) {
-    //             DB::rollBack();
-    //             return response()->json([
-    //                 'message' => 'Gagal import data',
-    //                 'error' => $e->getMessage(),
-    //                 'data' => $rows
-    //             ], 500);
-    //         }
-    //     }
-
-    //     return response()->json(['message' => 'Tidak ada data untuk diimport'], 400);
-    // }
 
     private function convertDate($date)
     {
@@ -781,7 +639,7 @@ class CatinController extends Controller
         return $rows
             ->groupBy('nik_perempuan')
             ->map(function ($items) {
-                $main = $items->sortByDesc('tanggal_pemeriksaan')->first();
+                $main = $items->sortByDesc('tanggal_pendampingan')->first();
 
                 return [
                     // informasi utama
@@ -860,9 +718,9 @@ class CatinController extends Controller
 
             $data = Catin::get();
 
-            $data = $data->groupBy('nik_perempuan')->map(function ($group) {
-                return $group->sortByDesc('tanggal_pemeriksaan')->first();
-            });
+            /* $data = $data->groupBy('nik_perempuan')->map(function ($group) {
+                return $group->sortByDesc('tanggal_pendampingan')->first();
+            }); */
 
             $dataRaw = $data;
 
@@ -892,8 +750,8 @@ class CatinController extends Controller
 
 
             $data = $data->filter(function ($item) use ($periodeAwal, $periodeAkhir) {
-                return $item->tanggal_pemeriksaan >= $periodeAwal->format('Y-m-d') &&
-                    $item->tanggal_pemeriksaan <= $periodeAkhir->format('Y-m-d');
+                return $item->tanggal_pendampingan >= $periodeAwal->format('Y-m-d') &&
+                    $item->tanggal_pendampingan <= $periodeAkhir->format('Y-m-d');
             });
 
             if ($request->posyandu) {
@@ -958,7 +816,13 @@ class CatinController extends Controller
                 ], 200);
             }
 
-            $total = $data->count();
+            $jml = $data
+            ->groupBy('nik_perempuan')
+            ->map(fn ($g) => $g->first())
+            ->values();
+
+            $total = $jml->count();
+            //$total = $data->count();
 
             // =====================================
             // 5. Hitung status berdasarkan FIELD BARU
@@ -1005,11 +869,11 @@ class CatinController extends Controller
                     $akhir = $tgl->copy()->endOfMonth()->format('Y-m-d');
 
                     $monthData = $dataRaw->filter(function ($item) use ($awal, $akhir) {
-                        return $item->tanggal_pemeriksaan >= $awal &&
-                            $item->tanggal_pemeriksaan <= $akhir;
+                        return $item->tanggal_pendampingan >= $awal &&
+                            $item->tanggal_pendampingan <= $akhir;
                     });
                     $groupedMonth = $monthData->groupBy('nik_perempuan')->map(function ($group) {
-                        return $group->sortByDesc('tanggal_pemeriksaan')->first();
+                        return $group->sortByDesc('tanggal_pendampingan')->first();
                     });
 
                     $totalMonth = $groupedMonth->count();

@@ -18,11 +18,17 @@ class MemberController extends Controller
         $user = Auth::user();
         //dd($user);
         $cadres = Cadre::with(['tpk', 'user']);
-        if ($user->role != 'SUPER ADMIN') {
+        switch ($user->role) {
+            case 'SUPER ADMIN':
+                // lihat semua
+                break;
 
-            $cadres->wherehas('user', function ($q) use ($user) {
-                $q->where('id_wilayah', $user->id_wilayah);
-            });
+            case 'ADMIN':
+                $cadres->whereHas('user', function ($q) use ($user) {
+                    $q->where('id_wilayah', $user->id_wilayah);
+                });
+                break;
+
         }
         $cadres = $cadres->get();
 
@@ -31,6 +37,7 @@ class MemberController extends Controller
                 'id'            => $cadre->id,
                 'no_tpk'        => $cadre->tpk->no_tpk ?? null,
                 'nama'          => $cadre->user->name ?? null,
+                'wilayah'       => $cadre->user->id_wilayah ?? null,
                 'action'        => null,
             ];
         });
@@ -176,7 +183,6 @@ class MemberController extends Controller
 
         return response()->json($data);
     }
-
 
     public function family($id)
     {

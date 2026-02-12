@@ -28,12 +28,26 @@ class FamilyController extends Controller
         $user = Auth::user();
 
         $keluargas = Keluarga::with('kepala', 'wilayah');
-        if ($user->role != 'SUPER ADMIN') {
+        /* if ($user->role != 'SUPER ADMIN') {
 
             $keluargas->wherehas('wilayah', function ($q) use ($user) {
                 $q->where('id', $user->id_wilayah);
             });
+        } */
+
+        switch ($user->role) {
+            case 'SUPER ADMIN':
+                /* $keluargas->wherehas('wilayah', function ($q) use ($user) {
+                    $q->where('id', $user->id_wilayah);
+                }); */
+                break;
+            case 'ADMIN':
+                $keluargas->wherehas('wilayah', function ($q) use ($user) {
+                    $q->where('id', $user->id_wilayah);
+                });
+                break;
         }
+
         $keluargas = $keluargas->get();
 
         $data = $keluargas->map(function ($k) {
