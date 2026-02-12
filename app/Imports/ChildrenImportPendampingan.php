@@ -20,10 +20,10 @@ use Maatwebsite\Excel\Concerns\WithStartRow;
 
 class ChildrenImportPendampingan implements ToCollection, WithStartRow
 {
-    protected array $wilayahUser = [];
+    /* protected array $wilayahUser = [];
     protected string $posyanduUser = '';
     protected string $rtPosyandu = '';
-    protected string $rwPosyandu = '';
+    protected string $rwPosyandu = ''; */
 
     public function __construct(private int $userId)
     {
@@ -51,6 +51,13 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
                 // =========================
                 // 0. Validasi data import
                 // =========================
+                if (!preg_match('/^[0-9`]+$/', $row[4])) {
+                    throw new \Exception(
+                        "NIK hanya boleh berisi angka dan karakter `",
+                        1001
+                    );
+                }
+
                 $nik = $this->normalizeNik($row[4] ?? null);
                 $nama = strtoupper($row[3]??'-');
                 $tglUkur = $this->convertDate($row[2]);
@@ -68,8 +75,8 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
 
                 if ($duplikat) {
                     throw new \Exception(
-                        "Data atas NIK {$nik}, nama {$nama} sudah diunggah pada "
-                        . $duplikat->created_at->format('d-m-Y'),
+                        "Data atas <strong>{$nik}</strong>, <strong>{$nama}</strong> sudah diunggah pada <strong>"
+                        . $duplikat->created_at->format('d-m-Y')."</strong>",
                         1001
                     );
                 }
@@ -220,13 +227,7 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
                 }
 
                 $user = User::where('name', strtoupper($row[1]))
-                ->whereHas('cadre', function ($q) {
-                    $q->where('id_posyandu', $this->posyanduUser)
-                    ->whereHas('posyandu', function ($p) {
-                        $p->where('rt', $this->rtPosyandu)
-                            ->where('rw', $this->rwPosyandu);
-                    });
-                })
+                ->where('id_wilayah', $wilayahData['id'])
                 ->first();
 
                 if (!$user) {
@@ -251,13 +252,16 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
                     'rw' => $row['rw'] ?? null,
                 ]);
 
-                $posyanduID = $user->role === 'Super Admin'? $posyandu->id : $this->posyanduUser;
+                $posyanduID = $user->role === 'Super Admin'
+                    ? $posyandu->id
+                    : $this->posyanduUserID;
 
                 $cadre = Cadre::firstOrCreate([
-                    'id_tpk' => null,
                     'id_user' => $user->id,
                     'id_posyandu' => $posyanduID,
-                    'status' => 'Non Kader',
+                ], [
+                    'id_tpk' => null,
+                    'status' => 'non-kader',
                 ]);
 
                 $dampinganKeluarga = DampinganKeluarga::firstOrCreate([
@@ -282,14 +286,8 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
                 throw new \Exception($e->getMessage());
             }
 
-            // ❌ error teknis
-            Log::error('Import CSV error teknis', [
-                'error' => $e->getMessage(),
-                'code' => $e->getCode(),
-            ]);
-
             throw new \Exception(
-                'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.'
+                'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.', $e->getCode(), $e
             );
         }
     }
@@ -386,7 +384,6 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
         );
     }
 
-
     private function hitungZScore($tipe, $jk, $usiaOrTb, $bb)
     {
         $sex = ($jk == 'L' || $jk == 'l' || $jk == 1 || $jk == "LAKI-LAKI") ? 1 : 2;
@@ -438,7 +435,6 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
         // Bulatkan ke 2 angka di belakang koma
         return round($z, 2);
     }
-
 
     private function statusBBU($z)
     {

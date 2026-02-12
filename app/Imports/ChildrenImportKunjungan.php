@@ -50,155 +50,175 @@ class ChildrenImportKunjungan implements
 
     public function model(array $row)
     {
-        return DB::transaction(function () use ($row) {
-            // =========================
-            // INTRO
-            // =========================
-            $user = Auth::user();
-            $wilayahData = $this->resolveWilayahFromRow($row);
+        try {
+            return DB::transaction(function () use ($row) {
+            //dd(array_keys($row));
+                // =========================
+                // INTRO
+                // =========================
+                $user = Auth::user();
+                $wilayahData = $this->resolveWilayahFromRow($row);
 
-            // =========================
-            // 0. Validasi data import
-            // =========================
-            $nik = $this->normalizeNik($row['nik'] ?? null);
-            $nama = $this->normalizeText($row['nama'] ?? '-');
-            $tglUkur = $this->convertDate($row['tanggal_pengukuran'] ?? null);
+                // =========================
+                // 0. Validasi data import
+                // =========================
+                if (!preg_match('/^[0-9`]+$/', $row['nik'])) {
+                    throw new \Exception(
+                        "NIK hanya boleh berisi angka dan karakter `",
+                        1001
+                    );
+                }
 
-            if (!$nik || !$tglUkur) {
-                throw new \Exception(
-                    "NIK atau tanggal pengukuran kosong / tidak valid pada data {$nama}",
-                    1001
-                );
+                $nik = $this->normalizeNik($row['nik'] ?? null);
+                $nama = $this->normalizeText($row['nama'] ?? '-');
+                $tglUkur = $this->convertDate($row['tanggal_pengukuran'] ?? null);
+
+                if (!$nik || !$tglUkur) {
+                    throw new \Exception(
+                        "NIK atau tanggal pengukuran kosong / tidak valid pada data {$nama}",
+                        1001
+                    );
+                }
+
+                $duplikat = Kunjungan::where('nik', $nik)
+                    ->whereDate('tgl_pengukuran', $tglUkur)
+                    ->first();
+
+                if ($duplikat) {
+                    throw new \Exception(
+                        "Data atas <strong>{$nik}</strong>, <strong>{$nama}</strong> sudah diunggah pada <strong>"
+                        . $duplikat->created_at->format('d-m-Y')."</strong>",
+                        1001
+                    );
+                }
+
+                // =========================
+                // 1. Parse tanggal
+                // =========================
+                $tglLahir = $this->convertDate($row['tgl_lahir'] ?? null);
+                $tglUkur  = $this->convertDate($row['tanggal_pengukuran'] ?? null);
+
+                // =========================
+                // 2. Hitung usia & status
+                // =========================
+                $usia = $this->hitungUmurBulan($tglLahir, $tglUkur);
+                $z_bbu  =  $this->normalizeDecimal($row["zs_bbu"] ?? null);
+                $z_tbu  =  $this->normalizeDecimal($row["zs_tbu"]?? null);
+                $z_bbtb = $this->normalizeDecimal( $row["zs_bbtb"]??null);
+
+                // =========================
+                // 3. Status gizi
+                // =========================
+                $status_bbu  = $this->statusBB($row["bbu"]);
+                $status_tbu  = $this->statusTB($row["tbu"]);
+                $status_bbtb = $this->statusBBTB($row["bbtb"]);
+
+                $naikBB = $this->normalizeNaikBeratBadan($row["naik_berat_badan"]);
+
+                $jkRaw = trim($row['jk'] ?? '');
+                $jk = strtoupper($jkRaw);
+
+                $validateJK = in_array($jk, ['L', 'P']);
+
+                if (!$validateJK) {
+                    throw new \Exception(
+                        "Format salah pada kolom JK. Nilai: '{$jkRaw}'. Gunakan L atau P.",
+                        1001
+                    );
+                }
+
+                // =========================
+                // 4. Simpan Kunjungan
+                // =========================
+                $kunjungan = Kunjungan::create([
+                    'nik' => $this->normalizeNik($row['nik'] ?? null),
+                    'nama_anak' => $this->normalizeText($row['nama'] ?? null),
+                    'jk' => $this->normalizeText($jk ?? null),
+                    'tgl_lahir' => $tglLahir,
+                    'bb_lahir' =>  $this->normalizeDecimal($row['bb_lahir']??null),
+                    'tb_lahir' => $this->normalizeDecimal($row['tb_lahir']??null),
+                    'nama_ortu' => $this->normalizeText($row['nama_ortu'] ?? null),
+                    'alamat' => $this->normalizeText($row['alamat'])?? null,
+                    'rt' => $row['rt']?? null,
+                    'rw' => $row['rw']?? null,
+                    'puskesmas' => $this->normalizeText($row['pukesmas']?? null),
+                    'posyandu' => $this->normalizeText($row['posyandu']?? null),
+                    'tgl_pengukuran' => $tglUkur,
+                    'usia_saat_ukur' => $usia,
+                    'bb' =>  $this->normalizeDecimal($row['berat']??null),
+                    'tb' =>  $this->normalizeDecimal($row['tinggi']??null),
+                    'lila' => $this->normalizeDecimal($row['lila'] ?? null),
+                    'provinsi'   => $wilayahData['provinsi'],
+                    'kota'       => $wilayahData['kota'],
+                    'kecamatan'  => $wilayahData['kecamatan'],
+                    'kelurahan'  => $wilayahData['kelurahan'],
+                    'bb_u' => $this->normalizeStatus($status_bbu),
+                    'zs_bb_u' => $z_bbu,
+                    'tb_u' => $this->normalizeStatus($status_tbu),
+                    'zs_tb_u' => $z_tbu,
+                    'bb_tb' => $this->normalizeStatus($status_bbtb),
+                    'zs_bb_tb' => $z_bbtb,
+                    'naik_berat_badan' => $naikBB,
+                    'catatan' => 'Perekaman data '.$row['nama'].' pada '.$tglUkur.' dengan hasil '.$this->normalizeStatus($status_bbtb).' secara import data',
+                    'petugas' => $user->name,
+                ]);
+
+                // =========================
+                // 5. Posyandu
+                // =========================
+                /* $wilayah = Wilayah::firstOrCreate([
+                    'provinsi' => $this->normalizeText($row['prov']) ?? $this->wilayahUser['provinsi'],
+                    'kota' => $this->normalizeText($row['kabkota']) ?? $this->wilayahUser['kota'],
+                    'kecamatan' => $this->normalizeText($row['kec']) ?? $this->wilayahUser['kecamatan'],
+                    'kelurahan' => $this->normalizeText($row['desakel']) ?? $this->wilayahUser['kelurahan'],
+                ]); */
+
+                Posyandu::firstOrCreate([
+                    'nama_posyandu' => $this->normalizeText($row['posyandu']),
+                    'id_wilayah' => $wilayahData['id'],
+                    'rt' => $row['rt'] ?? null,
+                    'rw' => $row['rw'] ?? null,
+                ]);
+
+                // =========================
+                // 6. Keluarga
+                // =========================
+                if (!empty($row['no_kk'] ?? null)) {
+                    Keluarga::firstOrCreate(
+                        ['no_kk' => $row['no_kk']],
+                        [
+                            'alamat' => $this->normalizeText($row['alamat']),
+                            'rt' => $row['rt'],
+                            'rw' => $row['rw'],
+                            'id_wilayah' => $wilayahData['id'],
+                            'is_pending' => false,
+                        ]
+                    );
+                }
+
+                // =========================
+                // 7. Log
+                // =========================
+                Log::create([
+                    'id_user' => $this->userId,
+                    'context' => 'Anak',
+                    'activity' => 'Import data anak ' . ($row['nama'] ?? '-'),
+                    'timestamp' => now(),
+                ]);
+
+                return $kunjungan;
+            });
+        } catch (\Throwable $e) {
+            // ✅ expected error
+            if ($e->getCode() === 1001) {
+                throw new \Exception($e->getMessage());
             }
 
-            $duplikat = Kunjungan::where('nik', $nik)
-                ->whereDate('tgl_pengukuran', $tglUkur)
-                ->first();
+            throw new \Exception(
+                'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.', $e->getCode(), $e
+            );
+        }
 
-            if ($duplikat) {
-                throw new \Exception(
-                    "Data atas NIK {$nik}, nama {$nama} sudah diunggah pada "
-                    . $duplikat->created_at->format('d-m-Y'),
-                    1001
-                );
-            }
-
-            // =========================
-            // 1. Parse tanggal
-            // =========================
-            $tglLahir = $this->convertDate($row['tgl_lahir'] ?? null);
-            $tglUkur  = $this->convertDate($row['tanggal_pengukuran'] ?? null);
-
-            // =========================
-            // 2. Hitung usia & status
-            // =========================
-            $usia = $this->hitungUmurBulan($tglLahir, $tglUkur);
-            $z_bbu  =  $this->normalizeDecimal($row["zs_bbu"] ?? null);
-            $z_tbu  =  $this->normalizeDecimal($row["zs_tbu"]?? null);
-            $z_bbtb = $this->normalizeDecimal( $row["zs_bbtb"]??null);
-
-            // =========================
-            // 3. Status gizi
-            // =========================
-            $status_bbu  = $this->statusBB($row["bbu"]);
-            $status_tbu  = $this->statusTB($row["tbu"]);
-            $status_bbtb = $this->statusBBTB($row["bbtb"]);
-
-            $naikBB = $this->normalizeNaikBeratBadan($row["naik_berat_badan"]);
-
-            $jkRaw = trim($row['jk'] ?? '');
-            $jk = strtoupper($jkRaw);
-
-            $validateJK = in_array($jk, ['L', 'P']);
-
-            if (!$validateJK) {
-                throw new \Exception(
-                    "Format salah pada kolom JK. Nilai: '{$jkRaw}'. Gunakan L atau P.",
-                    1001
-                );
-            }
-
-            // =========================
-            // 4. Simpan Kunjungan
-            // =========================
-            $kunjungan = Kunjungan::create([
-                'nik' => $this->normalizeNik($row['nik'] ?? null),
-                'nama_anak' => $this->normalizeText($row['nama'] ?? null),
-                'jk' => $this->normalizeText($jk ?? null),
-                'tgl_lahir' => $tglLahir,
-                'bb_lahir' =>  $this->normalizeDecimal($row['bb_lahir']??null),
-                'tb_lahir' => $this->normalizeDecimal($row['tb_lahir']??null),
-                'nama_ortu' => $this->normalizeText($row['nama_ortu'] ?? null),
-                'alamat' => $this->normalizeText($row['alamat'])?? null,
-                'rt' => $row['rt']?? null,
-                'rw' => $row['rw']?? null,
-                'puskesmas' => $this->normalizeText($row['pukesmas']?? null),
-                'posyandu' => $this->normalizeText($row['posyandu']?? null),
-                'tgl_pengukuran' => $tglUkur,
-                'usia_saat_ukur' => $usia,
-                'bb' =>  $this->normalizeDecimal($row['berat']??null),
-                'tb' =>  $this->normalizeDecimal($row['tinggi']??null),
-                'lila' => $this->normalizeDecimal($row['lila'] ?? null),
-                'provinsi'   => $wilayahData['provinsi'],
-                'kota'       => $wilayahData['kota'],
-                'kecamatan'  => $wilayahData['kecamatan'],
-                'kelurahan'  => $wilayahData['kelurahan'],
-                'bb_u' => $this->normalizeStatus($status_bbu),
-                'zs_bb_u' => $z_bbu,
-                'tb_u' => $this->normalizeStatus($status_tbu),
-                'zs_tb_u' => $z_tbu,
-                'bb_tb' => $this->normalizeStatus($status_bbtb),
-                'zs_bb_tb' => $z_bbtb,
-                'naik_berat_badan' => $naikBB,
-                'catatan' => 'Perekaman data '.$row['nama'].' pada '.$tglUkur.' dengan hasil '.$this->normalizeStatus($status_bbtb).' secara import data',
-                'petugas' => $user->name,
-            ]);
-
-            // =========================
-            // 5. Posyandu
-            // =========================
-            /* $wilayah = Wilayah::firstOrCreate([
-                'provinsi' => $this->normalizeText($row['prov']) ?? $this->wilayahUser['provinsi'],
-                'kota' => $this->normalizeText($row['kabkota']) ?? $this->wilayahUser['kota'],
-                'kecamatan' => $this->normalizeText($row['kec']) ?? $this->wilayahUser['kecamatan'],
-                'kelurahan' => $this->normalizeText($row['desakel']) ?? $this->wilayahUser['kelurahan'],
-            ]); */
-
-            Posyandu::firstOrCreate([
-                'nama_posyandu' => $this->normalizeText($row['posyandu']),
-                'id_wilayah' => $wilayahData['id'],
-                'rt' => $row['rt'] ?? null,
-                'rw' => $row['rw'] ?? null,
-            ]);
-
-            // =========================
-            // 6. Keluarga
-            // =========================
-            if (!empty($row['no_kk'] ?? null)) {
-                Keluarga::firstOrCreate(
-                    ['no_kk' => $row['no_kk']],
-                    [
-                        'alamat' => $this->normalizeText($row['alamat']),
-                        'rt' => $row['rt'],
-                        'rw' => $row['rw'],
-                        'id_wilayah' => $wilayahData['id'],
-                        'is_pending' => false,
-                    ]
-                );
-            }
-
-            // =========================
-            // 7. Log
-            // =========================
-            Log::create([
-                'id_user' => $this->userId,
-                'context' => 'Anak',
-                'activity' => 'Import data anak ' . ($row['nama'] ?? '-'),
-                'timestamp' => now(),
-            ]);
-
-            return $kunjungan;
-        });
     }
 
     /* ======================
@@ -359,14 +379,15 @@ class ChildrenImportKunjungan implements
 
         $value = strtolower(trim($value));
 
-        if (in_array($value, ['yes', 'ya', '1', 'true', 'T'])) {
+        if (in_array($value, ['yes', 'ya', '1', 'true', 't'])) {
             return true;
-        } elseif (in_array($value, ['no', 'tidak', '0', 'false', 'F'])) {
+        } elseif (in_array($value, ['no', 'tidak', '0', 'false', 'n'])) {
             return false;
         }
 
         return null;
     }
+
 
     protected function loadWilayahUser(): void
     {

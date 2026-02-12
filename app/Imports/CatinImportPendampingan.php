@@ -102,6 +102,12 @@ class CatinImportPendampingan implements
             // =========================
             // 0. Validasi data import
             // =========================
+            if (!preg_match('/^[0-9`]+$/', $row[4])) {
+                throw new \Exception(
+                    "NIK hanya boleh berisi angka dan karakter `",
+                    1001
+                );
+            }
 
             $nik = $this->normalizeNIK($row[4] ?? null);
             $nama = $this->normalizeText($row[3] ?? null);
@@ -120,8 +126,8 @@ class CatinImportPendampingan implements
 
             if ($duplikat) {
                 throw new \Exception(
-                    "Data atas NIK {$nik}, nama {$nama} sudah diunggah pada "
-                    . $duplikat->created_at->format('d-m-Y'),
+                    "Data atas <strong>{$nik}</strong>, <strong>{$nama}</strong> sudah diunggah pada <strong>"
+                    . $duplikat->created_at->format('d-m-Y')."</strong>",
                     1001
                 );
             }
@@ -189,6 +195,44 @@ class CatinImportPendampingan implements
             ]); */
 
             $user = User::where('name', strtoupper($row[1]))
+            ->where('id_wilayah', $wilayahData['id'])
+            ->first();
+
+            if (!$user) {
+                $user = User::create([
+                    'nik' => null,
+                    'name' => strtoupper($row[1]),
+                    'email' => $this->generateRandomEmail($row[1]),
+                    'email_verified_at' => now(),
+                    'phone' => null,
+                    'role' => null,
+                    'id_wilayah' => $wilayahData['id'],
+                    'status' => 1,
+                    'is_pending' => 1,
+                    'password' => '-',
+                ]);
+            }
+
+            $posyandu = Posyandu::firstOrCreate([
+                'nama_posyandu' => strtoupper($wilayahData['kelurahan']),
+                'id_wilayah' => $wilayahData['id'],
+                'rt' => $row['rt'] ?? null,
+                'rw' => $row['rw'] ?? null,
+            ]);
+
+            $posyanduID = $user->role === 'Super Admin'
+                ? $posyandu->id
+                : $this->posyanduUserID;
+
+            $cadre = Cadre::firstOrCreate([
+                'id_user' => $user->id,
+                'id_posyandu' => $posyanduID,
+            ], [
+                'id_tpk' => null,
+                'status' => 'non-kader',
+            ]);
+
+            /* $user = User::where('name', strtoupper($row[1]))
                 ->whereHas('cadre', function ($q) {
                     $q->where('id_posyandu', $this->posyanduUser)
                     ->whereHas('posyandu', function ($p) {
@@ -227,7 +271,7 @@ class CatinImportPendampingan implements
                 'id_user' => $user->id,
                 'id_posyandu' => $posyanduID,
                 'status' => 'non-kader',
-            ]);
+            ]); */
 
             $dampinganKeluarga = DampinganKeluarga::firstOrCreate([
                 'id_pendampingan' => $catin->id,

@@ -22,8 +22,8 @@ class PregnancyImportPendampingan implements
     protected array $wilayahUser = [];
     protected string $posyanduUser = '';
     protected string $posyanduUserID = '';
-    protected string $rtPosyandu = '';
-    protected string $rwPosyandu = '';
+    //protected string $rtPosyandu = '';
+    //protected string $rwPosyandu = '';
 
     public function __construct(private int $userId)
     {
@@ -64,14 +64,8 @@ class PregnancyImportPendampingan implements
                 throw new \Exception($e->getMessage());
             }
 
-            // ❌ error teknis
-            Log::error('Import CSV error teknis', [
-                'error' => $e->getMessage(),
-                'code' => $e->getCode(),
-            ]);
-
             throw new \Exception(
-                'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.'
+                'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.',422,$e
             );
         }
     }
@@ -79,6 +73,7 @@ class PregnancyImportPendampingan implements
     protected function processRow(array $row): void
     {
         DB::transaction(function () use ($row) {
+
 
             // =========================
             // INTRO
@@ -89,13 +84,20 @@ class PregnancyImportPendampingan implements
             // =========================
             // 0. Validasi data import
             // =========================
+            if (!preg_match('/^[0-9`]+$/', $row[4])) {
+                throw new \Exception(
+                    "NIK hanya boleh berisi angka dan karakter `",
+                    1001
+                );
+            }
+
             $nik = $this->normalizeNIK($row[4] ?? null);
             $nama = $this->normalizeText($row[3] ?? null);
             $tglUkur = $this->convertDate($row[2] ?? null);
 
             if (!$nik || !$tglUkur) {
                 throw new \Exception(
-                    "NIK atau tanggal pendampingan kosong / tidak valid pada data {$nama}"
+                    "NIK atau tanggal pendampingan kosong / tidak valid pada data {$nama}", 1001
                 );
             }
 
@@ -105,8 +107,9 @@ class PregnancyImportPendampingan implements
 
             if ($duplikat) {
                 throw new \Exception(
-                    "Data atas NIK {$nik}, nama {$nama} sudah diunggah pada "
-                    . $duplikat->created_at->format('d-m-Y')
+                    "Data atas <strong>{$nik}</strong>, <strong>{$nama}</strong> sudah diunggah pada <strong>"
+                    . $duplikat->created_at->format('d-m-Y')."</strong>",
+                    1001
                 );
             }
 
@@ -121,7 +124,6 @@ class PregnancyImportPendampingan implements
             if ($tinggi !== null && ($tinggi < 50 || $tinggi > 999)) {
                 $tinggi = null;
             }
-
 
             $hb = $this->normalizeDecimal($row[26] ?? null);
             // HARD VALIDATION (WAJIB)
@@ -256,13 +258,7 @@ class PregnancyImportPendampingan implements
             }
 
             $user = User::where('name', strtoupper($row[1]))
-                ->whereHas('cadre', function ($q) {
-                    $q->where('id_posyandu', $this->posyanduUser)
-                    ->whereHas('posyandu', function ($p) {
-                        $p->where('rt', $this->rtPosyandu)
-                            ->where('rw', $this->rwPosyandu);
-                    });
-                })
+            ->where('id_wilayah', $wilayahData['id'])
             ->first();
 
             if (!$user) {
@@ -281,18 +277,21 @@ class PregnancyImportPendampingan implements
             }
 
             $posyandu = Posyandu::firstOrCreate([
-                    'nama_posyandu' => strtoupper($wilayahData['kelurahan']),
-                    'id_wilayah' => $wilayahData['id'],
-                    'rt' => $row['rt'] ?? null,
-                    'rw' => $row['rw'] ?? null,
-                ]);
+                'nama_posyandu' => strtoupper($wilayahData['kelurahan']),
+                'id_wilayah' => $wilayahData['id'],
+                'rt' => $row['rt'] ?? null,
+                'rw' => $row['rw'] ?? null,
+            ]);
 
-            $posyanduID = $user->role === 'Super Admin'? $posyandu->id : $this->posyanduUserID;
+            $posyanduID = $user->role === 'Super Admin'
+                ? $posyandu->id
+                : $this->posyanduUserID;
 
             $cadre = Cadre::firstOrCreate([
-                'id_tpk' => null,
                 'id_user' => $user->id,
                 'id_posyandu' => $posyanduID,
+            ], [
+                'id_tpk' => null,
                 'status' => 'non-kader',
             ]);
 
@@ -414,7 +413,8 @@ class PregnancyImportPendampingan implements
             . "<li><strong>DD-MM-YYYY</strong> (contoh: 25-12-2024)</li>"
             . "<li><strong>YYYY/MM/DD</strong> (contoh: 2024/12/25)</li>"
             . "<li><strong>YYYY-MM-DD</strong> (contoh: 2024-12-25)</li>"
-            . "</ul>"
+            . "</ul>",
+            1001
         );
     }
 
