@@ -1976,7 +1976,9 @@ class PregnancyController extends Controller
         try {
             DB::beginTransaction();
 
-            $niks = $request->ids; // array NIK
+            $niks = $request->ids;
+            $bulkType = $request->bulk_type;
+            $filters  = $request->filters ?? [];
 
             if (!is_array($niks) || empty($niks)) {
                 return response()->json([
@@ -1985,8 +1987,82 @@ class PregnancyController extends Controller
                 ], 422);
             }
 
-            $deletedPregnancy = Pregnancy::whereIn('nik_ibu', $niks)->delete();
-            $deletedIntervensi = Intervensi::whereIn('nik_subjek', $niks)->delete();
+            $startDate = null;
+            $endDate = null;
+
+            if (!empty($filters['periodeAwal']) && !empty($filters['periodeAkhir'])) {
+                try {
+
+                    Carbon::setLocale('id');
+
+                    $start = Carbon::createFromLocaleFormat(
+                        'F Y',
+                        'id',
+                        $filters['periodeAwal']
+                    );
+
+                    $end = Carbon::createFromLocaleFormat(
+                        'F Y',
+                        'id',
+                        $filters['periodeAkhir']
+                    );
+
+                    $startDate = $start->copy()->startOfMonth();
+                    $endDate   = $end->copy()->endOfMonth();
+
+                } catch (\Exception $e) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Format periode tidak valid'
+                    ], 422);
+                }
+            }
+
+            $totalDeleted = 0;
+
+            switch ($bulkType) {
+
+                case 'intervensi_bumil':
+                    $query = Intervensi::whereIn('nik_subjek', $niks);
+                    if ($startDate && $endDate) {
+                        $query->whereBetween('tgl_intervensi', [$startDate, $endDate]);
+                    }
+                    $totalDeleted = $query->delete();
+                    break;
+
+                case 'pendampingan_bumil':
+                    $query = Pregnancy::whereIn('nik_ibu', $niks);
+                    if ($startDate && $endDate) {
+                        $query->whereBetween('tgl_pendampingan', [$startDate, $endDate]);
+                    }
+                    $totalDeleted = $query->delete();
+                    break;
+
+                case 'data_bumil':
+
+                    $queryIntervensi = Intervensi::whereIn('nik_subjek', $niks);
+                    $queryPendampingan = Pregnancy::whereIn('nik_ibu', $niks);
+
+                    if ($startDate && $endDate) {
+                        $queryIntervensi->whereBetween('tgl_intervensi', [$startDate, $endDate]);
+                        $queryPendampingan->whereBetween('tgl_pendampingan', [$startDate, $endDate]);
+                    }
+
+                    $deletedIntervensi = $queryIntervensi->delete();
+                    $deletedPendampingan = $queryPendampingan->delete();
+
+                    $totalDeleted = $deletedPendampingan;
+
+                    break;
+
+                default:
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Jenis bulk tidak valid'
+                    ], 422);
+            }
+            //$deletedPregnancy = Pregnancy::whereIn('nik_ibu', $niks)->delete();
+            //$deletedIntervensi = Intervensi::whereIn('nik_subjek', $niks)->delete();
 
             DB::commit();
 
@@ -1994,8 +2070,7 @@ class PregnancyController extends Controller
                 'id_user'  => Auth::id(),
                 'context'  => 'Data Bumil',
                 'activity' => 'Bulk Delete (' . (
-                    $deletedPregnancy +
-                    $deletedIntervensi
+                    $totalDeleted
                 ) . ' data)',
                 'timestamp'=> now(),
             ]);
@@ -2003,8 +2078,7 @@ class PregnancyController extends Controller
             return response()->json([
                 'success' => true,
                 'deleted' => [
-                    'pendampingan'     => $deletedPregnancy,
-                    'intervensi'    => $deletedIntervensi,
+                    'pendampingan'     => $totalDeleted
                 ]
             ]);
 
@@ -2018,7 +2092,8 @@ class PregnancyController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menghapus data keluarga'
+                'message' => 'Gagal menghapus data keluarga',
+                'error' => $e->getMessage()
             ], 500);
         }
     }

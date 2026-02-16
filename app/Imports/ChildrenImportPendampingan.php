@@ -254,7 +254,7 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
 
                 $posyanduID = $user->role === 'Super Admin'
                     ? $posyandu->id
-                    : $this->posyanduUserID;
+                    : $this->posyanduUser;
 
                 $cadre = Cadre::firstOrCreate([
                     'id_user' => $user->id,
@@ -263,6 +263,46 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
                     'id_tpk' => null,
                     'status' => 'non-kader',
                 ]);
+                /* $user = User::where('name', strtoupper($row[1]))
+                    ->whereHas('cadre', function ($q) {
+                        $q->where('id_posyandu', $this->posyanduUser)
+                        ->whereHas('posyandu', function ($p) {
+                            $p->where('rt', $this->rtPosyandu)
+                                ->where('rw', $this->rwPosyandu);
+                        });
+                    })
+                    ->first();
+
+                if (!$user) {
+                    $user = User::create([
+                        'nik' => null,
+                        'name' => strtoupper($row[1]),
+                        'email' => $this->generateRandomEmail($row[1]),
+                        'email_verified_at' => now(),
+                        'phone' => null,
+                        'role' => null,
+                        'id_wilayah' => $wilayahData['id'],
+                        'status' => 1,
+                        'is_pending' => 1,
+                        'password' => '-',
+                    ]);
+                }
+
+                $posyandu = Posyandu::firstOrCreate([
+                    'nama_posyandu' => strtoupper($wilayahData['kelurahan']),
+                    'id_wilayah' => $wilayahData['id'],
+                    'rt' => $row['rt'] ?? null,
+                    'rw' => $row['rw'] ?? null,
+                ]);
+
+                $posyanduID = $user->role === 'Super Admin'? $posyandu->id : $this->posyanduUser;
+
+                $cadre = Cadre::firstOrCreate([
+                    'id_tpk' => null,
+                    'id_user' => $user->id,
+                    'id_posyandu' => $posyanduID,
+                    'status' => 'Non Kader',
+                ]); */
 
                 $dampinganKeluarga = DampinganKeluarga::firstOrCreate([
                     'id_pendampingan' => $child->id,
@@ -287,7 +327,7 @@ class ChildrenImportPendampingan implements ToCollection, WithStartRow
             }
 
             throw new \Exception(
-                'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.', $e->getCode(), $e
+                $e->getMessage()//'Gagal import data, silahkan check dan bandingkan kembali format csv dengan contoh yang diberikan.', $e->getCode(), $e
             );
         }
     }
